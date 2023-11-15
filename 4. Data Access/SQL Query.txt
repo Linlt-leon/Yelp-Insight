@@ -1,0 +1,87 @@
+Queries/Applications
+The proposed application of our database consists following 3 scenarios:
+1.For Customers: 	The most general and widely-used functions of our database. Provide some general information of the businesses for individuals. 
+	1.1 Get top-n business in the city. n=10, 20, 50, 100
+SELECT * FROM business WHERE city = 'Philadelphia' ORDER BY stars DESC LIMIT 100;
+100 rows in set (0.53 sec)
+	1.2 Get top-10 business nearby m km (compute via lat, lng) m=0.1, 0.5, 1, 5, 10
+ SELECT * FROM business WHERE   SQRT(POW((latitude - (39.9298)), 2) + POW((longitude - (-85.984)), 2)) * 111.32 <= 1  ORDER BY stars DESC LIMIT 100;
+
+11 rows in set (0.33 sec)
+
+	1.3 Get all reviews for a specific business, sorted by stars. business_id, stars
+SELECT * FROM review WHERE business_id = (SELECT business_id from business WHERE name = "West Side Kebab House") ORDER BY stars DESC LIMIT 10;
+
+10 rows in set (2 min 6.45 sec)
+
+	1.4 Get and update user's own profile (e.g. reviews, likes, elite records etc....)
+SELECT user_id, name, yelping_since FROM user WHERE user_id = 'j14WgRoU_-2ZE1aw1dXrJg';
+
+1 row in set (2.55 sec)
+
+UPDATE user SET useful = 520, funny = 520, cool = 520 where user_id = 'j14WgRoU_-2ZE1aw1dXrJg';
+
+Query OK, 1 row affected (3.53 sec)
+Rows matched: 1  Changed: 1  Warnings: 0
+
+
+	1.5 Get review of their own friends, sorted by datetime
+SELECT c.* FROM review  c JOIN friends f ON c.user_id = f.friend_id WHERE f.user_id = ‘j14WgRoU_-2ZE1aw1dXrJg’ ORDER BY c.date DESC LIMIT 20;
+
+59019 rows in set (7 min 42.40 sec)
+
+	1.6 Get the recent review from influencers (e.g. elite user, popular user etc...
+
+WITH RankedUsers AS (
+    SELECT 
+        u.user_id,
+        PERCENT_RANK() OVER (ORDER BY u.fans) AS percentile_rank
+    FROM user u
+    WHERE (u.elite LIKE '%2016%' OR u.elite LIKE '%2017%' OR u.elite LIKE '%2015%')
+)
+SELECT r.*
+FROM review r
+JOIN RankedUsers ru ON r.user_id= ru.user_id
+WHERE ru.percentile_rank > 0.7
+ORDER BY r.date DESC;
+
+463248 rows in set (3 min 1.35 sec)
+
+2.For Business Owners: 	To know more about their own business and customers. Note that in this scenario, we should focus on the accessibility of the privacy and sensitive information across different business and users.
+	2.1 Get all check-in histories of their specific business business_id
+SELECT * FROM checkin c WHERE c.business_id = -QI8Qi8XWH3D8y8ethnajA;
+52144 rows in set (10.31 sec)
+
+	2.2 Get the most information of their customers (id, name, review_count, yelping_since, ...) 
+SELECT u.user_id, u.name, u.review_count, u.yelping_since FROM user u WHERE u.user_id IN (SELECT DISTINCT user_id FROM review WHERE business_id = '9n-1LQLX3ntBfBtMwgSpig');
+
+258 rows in set (1 min 53.66 sec)
+
+
+	2.3 Get the time-series characteristics (peak times and off-peak times) of their business
+
+SELECT HOUR(date) hour, count(*) frequency FROM checkin WHERE business_id = '-QI8Qi8XWH3D8y8ethnajA' GROUP BY hour ORDER BY hour;
+
+24 rows in set (10.00 sec)
+
+	2.4 Get average stars from the review table within a duration
+
+select business_id, avg(stars) from review WHERE date between '2010-01-01' and '2015-01-01' group by business_id;
+
+	2.5 Get transaction records of their business within a duration 
+SELECT * FROM transaction WHERE business_id =  (SELECT b.business_id FROM business b WHERE b.name = "Zio's Italian Market")  AND time BETWEEN '2013-01-01' AND '2015-01-01';
+
+18 rows in set (26.32 sec)
+
+3.For Platform Administrators: 	For the most advanced tracking through out businesses and customers. All functions are yielded with the highest accessibility. Provide YELP administrators a toolbox for handling and maintain the entire platform.
+	3.1 Get all active users within a duration (who performed a review)
+SELECT u.* FROM user u WHERE u.user_id IN (SELECT DISTINCT r.user_id FROM review r WHERE r.date BETWEEN '2015-01-01' AND '2017-01-01') ;
+550479 rows in set (2 min 30.05 sec)
+
+	3.2 Average rating of businesses across different categories or regions. (so called: analyze business performance across the platform)
+SELECT city, AVG(stars) FROM business GROUP BY city; 
+1269 rows in set (0.43 sec)
+
+	3.3 Filter out influencers: get top-1000 users with the most popularity (sum: useful+funny+cool)
+SELECT  u.*, (useful + funny + cool) as popularity FROM user u order by popularity DESC LIMIT 1000;
+1000 rows in set (5.54 sec)

@@ -1,0 +1,231 @@
+Queries/Applications
+The proposed application of our database consists following 3 scenarios:
+1.For Customers: 	The most general and widely-used functions of our database. Provide some general information of the businesses for individuals. 
+	1.1 Get top-n business in the city. n=10, 20, 50, 100
+  db.business.find({ city: "Cityname” }).sort({ stars: -1 }).limit(n);
+
+	1.2 Get top-10 business nearby m km (compute via lat, lng) m=0.1, 0.5, 1, 5, 10
+
+var bulkOps = [];
+
+db.business.find({}).forEach(function(business) {
+    var location = {
+        type: "Point",
+        coordinates: [business.longitude, business.latitude]
+    };
+
+    bulkOps.push({
+        updateOne: {
+            filter: { _id: business._id },
+            update: { $set: { location: location } }
+        }
+    });
+
+    if (bulkOps.length === 1000) {
+        db.business.bulkWrite(bulkOps);
+        bulkOps = [];
+    }
+});
+
+if (bulkOps.length > 0) {
+    db.business.bulkWrite(bulkOps);
+}
+
+db.business.createIndex({ location: "2dsphere" });
+
+let userLocation = { type: "Point", coordinates: [userLng, userLat] };
+
+db.business.aggregate([
+    {
+        $geoNear: {
+            near: userLocation,
+            distanceField: "distance",
+            spherical: true,
+            maxDistance: m * 1000, // Convert km to meters
+            query: { is_open: 1 } // Optional: Add any additional query conditions
+        }
+    },
+    {
+        $limit: 10
+    },
+    {
+        $project: {
+            business_id: 1,
+            name: 1,
+            address: 1,
+            distance: "$distance"
+        }
+    }
+]);
+
+
+	1.3 Get all reviews for a specific business, sorted by stars. business_id, stars
+
+var targetBusinessName = "business_name";
+var targetBusiness = db.business.findOne({ name: targetBusinessName });
+
+if (targetBusiness) {
+    var targetBusinessId = targetBusiness.business_id;
+
+    var reviewsForTargetBusiness = db.review.find({ business_id: targetBusinessId }).sort({ stars: 1 });
+		printjson(reviewsForTargetBusiness)
+
+} else {
+    print("Business not found with name: " + targetBusinessName);
+}
+
+	1.4 Get and update user's own profile (e.g. reviews, likes, elite records etc....)
+
+db.user.find({ user_id: "YourUserID" });
+
+db.user.update({ user_id: "YourUserID" }, { $set: { /* Update fields */ } }); 
+
+	1.5 Get review of their own friends, sorted by datetime
+
+var targetUserId = "your_target_user_id";
+
+var targetUser = db.user.findOne({ user_id: targetUserId });
+
+if (targetUser) {
+    var friendsList = targetUser.friends ? targetUser.friends.split(",") : [];
+
+    var friendsReviews = db.review.find({ user_id: { $in: friendsList } }).sort({ date: 1 });
+
+    friendsReviews.forEach(function(review) {
+        printjson(review);
+    });
+} else {
+    print("User not found with user_id: " + targetUserId);
+}
+
+	1.6 Get the recent review from influencers (e.g. elite user, popular user etc...)
+
+db.user.createIndex({"fans": -1 });
+db.review.createIndex({"date": -1 });
+
+const reviewUserIds = db.review.distinct("user_id", {
+  "date": {
+    $gte:'2015-01-01',
+    $lt: '2016-01-01'
+  }
+});
+
+var eliteUserIds = db.user.find(
+  { 'elite': { $in: [2015, 2016, 2017] }},
+).hint({ "fans": -1 }).limit(Math.ceil(0.3 * db.user.countDocuments()))
+
+var eliteUserIds = db.user.find(
+  { 'elite': { $in: [2015, 2016, 2017] }},{_id:0, 'user_id':1}
+).hint({ "fans": -1 }).limit(Math.ceil(0.3 * db.user.countDocuments()))
+
+var recentInfluencerReviews = db.review.find(
+  { "user_id": { $in: eliteUserIds.user_id } }
+).hint({ "date": -1 }).limit(100);
+print(recentInfluencerReviews)
+
+2.For Business Owners: 	To know more about their own business and customers. Note that in this scenario, we should focus on the accessibility of the privacy and sensitive information across different business and users.
+	2.1 Get all check-in histories of their specific business business_id
+
+db.checkin.find({ "business_id": '-QI8Qi8XWH3D8y8ethnajA'})
+	2.2 Get the most information of their customers (id, name, review_count, yelping_since, ...) 
+
+const businessUserIds = db.review.distinct("user_id", {'business_id': 'XQfwVwDr-v0ZS3_CbbE5Xw'});
+
+db.user.find({
+    'user_id': { $in: businessUserIds }
+}, { '_id': 0, 'user_id': 1, 'name': 1, 'review_count': 1, 'yelping_since': 1 });
+
+
+	2.3 Get the time-series characteristics (peak times and off-peak times) of their business
+
+db.checkins.aggregate([
+  {
+ 	'business_id': "-QI8Qi8XWH3D8y8ethnajA" 
+   },
+  {
+    $unwind: "$date"
+  },
+  {
+    $project: {
+      hour: { $hour: "$date" }
+    }
+  },
+  {
+    $group: {
+      _id: "$hour",
+      count: { $sum: 1 }
+    }
+  },
+  {
+    $sort: {
+      _id: 1
+    }
+  }
+]);
+
+	2.4 Get average stars from the review table within a duration
+
+var averageStarsPipeline = [
+    {
+        $match: {
+            "business_id": "XQfwVwDr-v0ZS3_CbbE5Xw",
+            "date": {
+                $gte: "2010-01-01",
+                $lte: "2020-01-01"
+            }
+        }
+    },
+    {
+        $group: {
+            _id: "$business_id",
+            averageStars: { $avg: "$stars" }
+        }
+    }
+];
+db.review.aggregate(averageStarsPipeline)
+
+	2.5 Get transaction records of their business within a duration (Lin generated)
+db.transaction.find({'business_id': '-QI8Qi8XWH3D8y8ethnajA', 'time': {$gte: '2014-01-01',$lte: '2017-01-01'}})
+
+3.For Platform Administrators: 	For the most advanced tracking through out businesses and customers. All functions are yielded with the highest accessibility. Provide YELP administrators a toolbox for handling and maintain the entire platform.
+	3.1 Get all active users within a duration (who performed a review)
+
+const reviewUserIds = db.review.distinct("user_id", {
+  "date": {
+    $gte:'2015-01-01',
+    $lt: '2016-01-01'
+  }
+});
+db.user.find({
+  "user_id": { $in: reviewUserIds }
+}, { _id: 0, user_id: 1, name: 1 }) 
+
+	3.2 Average rating of businesses across different categories or regions. (so called: analyze business performance across the platform)
+db.business.aggregate([
+  {
+    $group: {
+      _id: "$categories", 
+      average_rating: { $avg: "$stars" }
+    }
+  },
+  {
+    $sort: { average_rating: -1 } 
+  }
+]);
+
+	3.3 Filter out influencers: get top-1000 users with the most popularity (sum: useful+funny+cool)
+db.user.aggregate([
+  {
+    $project: {
+      user_id: 1,
+      name: 1,
+      popularity: { $sum: ["$useful", "$funny", "$cool"] }
+    }
+  },
+  {
+    $sort: { popularity: -1 }
+  },
+  {
+    $limit: 1000
+  }
+]);

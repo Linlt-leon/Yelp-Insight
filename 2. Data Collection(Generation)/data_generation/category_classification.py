@@ -26,7 +26,6 @@ def get_category(long_string):
 
 # load model and tokenizer
 model = "/hy-tmp/llama-2-7b-chat-hf"
-prompt = "What is the approximate number of luffas that a fully grown luffa tree can produce in a single growing season?\n"
 
 tokenizer = AutoTokenizer.from_pretrained(model)
 pipeline = transformers.pipeline(
